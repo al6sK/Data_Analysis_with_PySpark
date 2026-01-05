@@ -3,4 +3,4 @@ venv/
 .venv/
 */.venv/
 
-DATA/CSV_FILES/
+DATA/
