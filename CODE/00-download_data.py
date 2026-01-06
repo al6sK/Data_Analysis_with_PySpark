@@ -4,7 +4,7 @@ import zipfile
 
 url = 'https://archive.ics.uci.edu/static/public/487/gas+sensor+array+temperature+modulation.zip'
 
-folder_path = 'DATA'
+folder_path = 'DATA/downloads'
 os.makedirs(folder_path, exist_ok=True)
 
 local_filename = os.path.join(folder_path, 'data.zip')
@@ -13,7 +13,6 @@ local_filename2 = os.path.join(folder_path, "gas-sensor-array-temperature-modula
 try:
     print(f"Downloading data...")
     urllib.request.urlretrieve(url, local_filename)
-    
     
     print("Unzipping files...")
     with zipfile.ZipFile(local_filename, 'r') as zip_ref:
