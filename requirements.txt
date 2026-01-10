@@ -1,1 +1,6 @@
 pyspark == 3.5.3
+pandas
+matplotlib
+seaborn
+pyarrow
+statsmodels
