@@ -14,6 +14,8 @@ import numpy as np
 # =======================================================
 # FIX FOR WINDOWS ONLY                                  #
 # =======================================================
+os.environ['SPARK_LOCAL_IP'] = '127.0.0.1'              #
+os.environ['SPARK_DRIVER_HOST'] = '127.0.0.1'           #
 os.environ['HADOOP_HOME'] = "C:\\hadoop"                #
 sys.path.append("C:\\hadoop\\bin")                      #
 os.environ['PATH'] += os.pathsep + "C:\\hadoop\\bin"    #
@@ -77,9 +79,9 @@ df_final = df_sorted.withColumn("Timestamp",F.to_timestamp(F.lit(start_date)) + 
 df_final.select("Timestamp","CO_ppm", "Humidity", "Temperature", "Flow_rate", "Heater_voltage", "R14").show(10, truncate=False)
 print(f"Final rows: {df_final.count()}")
 
-# =======================================
+# ===========================================================================================
 # Preprocessing
-# =======================================
+# ===========================================================================================
 
 # Find null values 
 df_final.select([count(when(col(c).isNull(), 1)).alias(c) for c in df_final.columns]).show()
@@ -88,9 +90,13 @@ data = df_final.toPandas().set_index('Timestamp')
 print(data.shape)
 print(data.head())
 
-# =======================================
+# save to csv file for later
+data.to_csv("DATA/data_Downsampled.csv", index=True)
+
+
+# ===========================================================================================
 # Box plot
-# =======================================
+# ===========================================================================================
 fig, ax = plt.subplots(figsize=(12, 6))
 data.select_dtypes(include=["number"]).plot.box(
     ax=ax,
@@ -129,9 +135,10 @@ plt.tight_layout()
 
 plt.savefig(os.path.join(plots_path, 'Box_Plot.png'), dpi=300, bbox_inches="tight")
 plt.close()
-# =======================================
+
+# ===========================================================================================
 # Distribution_histplots
-# =======================================
+# ===========================================================================================
 Distribution_histplots_path = os.path.join(plots_path, 'Distribution_histplots')
 os.makedirs(Distribution_histplots_path, exist_ok=True)
 
@@ -191,9 +198,9 @@ for i in range(len(numeric_cols)):
 
     plt.savefig(os.path.join(Distribution_histplots_path, numeric_cols[i] + "_Distribution_histplot.png"), dpi=300, bbox_inches="tight")
     plt.close()
-# =======================================
+# ===========================================================================================
 # Correlation Matrix
-# =======================================
+# ===========================================================================================
 corr = data.select_dtypes(include=["number"]).corr(method="pearson").round(2)
 
 # Create the mask for the upper triangle
@@ -227,9 +234,9 @@ plt.tight_layout()
 plt.savefig(os.path.join(plots_path, 'Correlation_Plot.png'), dpi=300, bbox_inches="tight")
 plt.close()
 
-# ========================================================
+# ===========================================================================================
 # Plot CO_ppm","R1","R7","R14 values over time
-# ========================================================
+# ===========================================================================================
 columns_for_norm = ["CO_ppm","R1","R7","R14"]
 for feature in columns_for_norm:
     min_val = data[feature].min()
@@ -257,14 +264,17 @@ plt.tight_layout()
 plt.savefig(os.path.join(plots_path, 'CO_ppm_vs_R1_R7_R14.png'), dpi=300)
 plt.close()
 
-
+# ===========================================================================================
 # (i) Sum of CO_ppm in all record that have Heater_voltage >= Heater_voltage * 0.6
+# ===========================================================================================
 max_voltage = df_final.agg(F.max("Heater_voltage")).collect()[0][0]
 result = df_final.filter(F.col("Heater_voltage") > max_voltage * 0.6).agg(F.sum("CO_ppm")).collect()[0][0]
 print(f"Sum of CO_ppm: {result}")
 
+# ===========================================================================================
 # (ii) Return mean and variance of each sensor values
-sensors = ["R1", "R2", "R3", "R4", "R5", "R6", "R7","R8", "R9", "R10", "R11", "R12", "R13", "R14"]
+# ===========================================================================================
+sensors = ["R" + i for i in range(1,15)]
 
 mean_exprs = [mean(r).alias(r) for r in sensors]
 df_mean = df_final.select(mean_exprs).withColumn("Statistic", lit("Mean"))
@@ -273,22 +283,26 @@ df_variance = df_final.select(variance_exprs).withColumn("Statistic", lit("Varia
 
 columns = ["Statistic"] + sensors
 result = df_mean.union(df_variance).select(columns)
-
 result.show(truncate=True)
 
+# ===========================================================================================
 # (iii) Return the count of rows that have CO_ppm > 10 ppm and Humidity < 30 % RH 
+# ===========================================================================================
 count = df_final.filter("CO_ppm > 10 AND Humidity < 30").count()
 print(f"{count} is the number of rows that have CO_ppm > 10 ppm and Humidity < 30 % RH")
 
-# (iv) Create a new column R, with R = ((5-V)/V) * 1_000_000  
+# ===========================================================================================
+# (iv) Create a new column R, with R = ((5-V)/V) * 1_000_000 
+# ===========================================================================================
 df_final = df_final.withColumn("R", (( 5 - col("Heater_voltage")) / col("Heater_voltage")) * 1_000_000)
 result = df_final.groupBy("Heater_voltage").agg(max("R").alias("max_R"))
 result = result.withColumn("max_R",format_number("max_R", 2))
 result.show(truncate=False)
 
+# ===========================================================================================
 # (v) 
+# ===========================================================================================
 filtered_data = df_final.select("Timestamp", "CO_ppm", "Humidity", "R1")
-
 data = filtered_data.toPandas().set_index('Timestamp')[:100]
 
 # plot R8 sensor with 30 minute window
