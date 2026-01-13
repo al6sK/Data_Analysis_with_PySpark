@@ -59,11 +59,11 @@ new_column_names = [
 df_renamed = df_raw.toDF(*new_column_names)
 
 # ===========================================================================================
-# Downsampling
+# Downsampling to 5 min
 # ===========================================================================================
 df_bucketed = df_renamed.withColumn("Time", F.floor(F.col("Time") / 300))
 
-cols_to_avg = [c for c in df_renamed.columns if c not in ["Time","source_file"]]
+cols_to_avg = [c for c in df_bucketed.columns if c not in ["Time","source_file"]]
 calc_mean = [F.mean(c).alias(c) for c in cols_to_avg]
 
 df_grouped_by_file = df_bucketed.groupBy("source_file", "Time").agg(*calc_mean)
@@ -91,51 +91,53 @@ print(data.shape)
 print(data.head())
 
 # save to csv file for later
-data.to_csv("DATA/data_Downsampled.csv", index=True)
+data.to_csv("DATA/raw_data_Downsampled.csv", index=True)
 
 
 # ===========================================================================================
 # Box plot
 # ===========================================================================================
-fig, ax = plt.subplots(figsize=(12, 6))
-data.select_dtypes(include=["number"]).plot.box(
-    ax=ax,
-    rot=30,  # Rotate labels for readability
-    showmeans=True,  # Show mean indicator
-    meanprops={"marker": "o", "markerfacecolor": "red", "markeredgecolor": "black"},
-    patch_artist=True,  # Fill boxes with color
-)
+def boxplot(data,filename):
+    fig, ax = plt.subplots(figsize=(12, 6))
+    data.select_dtypes(include=["number"]).plot.box(
+        ax=ax,
+        rot=30,  # Rotate labels for readability
+        showmeans=True,  # Show mean indicator
+        meanprops={"marker": "o", "markerfacecolor": "red", "markeredgecolor": "black"},
+        patch_artist=True,  # Fill boxes with color
+    )
 
-ax.set_yscale("symlog", linthresh=10)
+    ax.set_yscale("symlog", linthresh=10)
 
-# Grid & Layout
-ax.grid(True, linestyle="--", alpha=0.5)
-ax.set_ylim(bottom=-0.05, top=None)
+    # Grid & Layout
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.set_ylim(bottom=-0.05, top=None)
 
-# Labels and Title
-ax.set_ylabel("Count (Log Scale)", fontsize=12)
-ax.set_title(
-    "Distribution of Features",
-    fontsize=14,
-    fontweight="bold",
-    loc="left",
-    pad=30,
-)
-plt.figtext(
-    0.1,
-    0.92,
-    "Box plot representing statistics with log scaling",
-    ha="left",
-    fontsize=10,
-)
+    # Labels and Title
+    ax.set_ylabel("Count (Log Scale)", fontsize=12)
+    ax.set_title(
+        "Distribution of Features",
+        fontsize=14,
+        fontweight="bold",
+        loc="left",
+        pad=30,
+    )
+    plt.figtext(
+        0.1,
+        0.92,
+        "Box plot representing statistics with log scaling",
+        ha="left",
+        fontsize=10,
+    )
 
-# Seaborn Style
-sns.despine()
-plt.tight_layout()
+    # Seaborn Style
+    sns.despine()
+    plt.tight_layout()
 
-plt.savefig(os.path.join(plots_path, 'Box_Plot.png'), dpi=300, bbox_inches="tight")
-plt.close()
+    plt.savefig(os.path.join(plots_path, f'{filename}.png'), dpi=300, bbox_inches="tight")
+    plt.close()
 
+boxplot(data,"Box_Plot")
 # ===========================================================================================
 # Distribution_histplots
 # ===========================================================================================
@@ -198,6 +200,19 @@ for i in range(len(numeric_cols)):
 
     plt.savefig(os.path.join(Distribution_histplots_path, numeric_cols[i] + "_Distribution_histplot.png"), dpi=300, bbox_inches="tight")
     plt.close()
+
+# ===========================================================================================
+# Logarithmic Transformation on positive skew features 
+# ===========================================================================================
+
+log_cols = [f'R{i}' for i in range(1, 15)]
+data[log_cols] = np.log1p(data[log_cols])
+
+boxplot(data,"Box_Plot_log_data")
+
+# save to csv file for later
+data.to_csv("DATA/log_data_Downsampled.csv", index=True)
+
 # ===========================================================================================
 # Correlation Matrix
 # ===========================================================================================
@@ -274,7 +289,7 @@ print(f"Sum of CO_ppm: {result}")
 # ===========================================================================================
 # (ii) Return mean and variance of each sensor values
 # ===========================================================================================
-sensors = ["R" + i for i in range(1,15)]
+sensors = ["R" + str(i) for i in range(1,15)]
 
 mean_exprs = [mean(r).alias(r) for r in sensors]
 df_mean = df_final.select(mean_exprs).withColumn("Statistic", lit("Mean"))
@@ -300,24 +315,31 @@ result = result.withColumn("max_R",format_number("max_R", 2))
 result.show(truncate=False)
 
 # ===========================================================================================
-# (v) 
+# (v) Downsampling to 25 min
 # ===========================================================================================
-filtered_data = df_final.select("Timestamp", "CO_ppm", "Humidity", "R1")
-data = filtered_data.toPandas().set_index('Timestamp')[:100]
 
-# plot R8 sensor with 30 minute window
+cols_to_avg = ["R7","CO_ppm","Humidity"]
+
+aggs = [F.mean(c).alias(c) for c in cols_to_avg]
+sampled_data = df_final.groupBy(F.window("Timestamp", "25 minutes")).agg(*aggs)
+# keep only the start of the returned window
+sampled_data = sampled_data.withColumn("Timestamp", F.col("window.start")).drop("window").orderBy("Timestamp")
+sampled_data.select("Timestamp","R7", "CO_ppm", "Humidity").show(10, truncate=False)
+
+sampled_data = sampled_data.toPandas().set_index('Timestamp')
+sampled_data = sampled_data[:int(len(sampled_data)/6)]
+colors = sns.color_palette("bright", 5)
 plt.figure(figsize=(15,8))
-plt.plot(data['R1'], label='R1', color=colors[0], linewidth=1.5,alpha=0.8)
-plt.plot(data['CO_ppm'], label='CO_ppm', color=colors[1], linewidth=1.5,alpha=0.8)
-plt.plot(data['Humidity'], label='Humidity', color=colors[2], linewidth=1.5,alpha=0.8)
-plt.title('R1 sensor values over time')
+plt.plot(sampled_data['R7'], label='R7', color=colors[0], linewidth=1.5,alpha=0.8)
+plt.plot(sampled_data['CO_ppm'], label='CO_ppm', color=colors[1], linewidth=1.5,alpha=0.8)
+plt.plot(sampled_data['Humidity'], label='Humidity', color=colors[2], linewidth=1.5,alpha=0.8)
+plt.title('Sampled data over 25 minutes')
 plt.xlabel('Time')
 plt.ylabel('Value')
 plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
 plt.grid("x")
 plt.tight_layout()
-plt.savefig(os.path.join(plots_path, 'R1_CO_ppm_Humidity_values_over_time.png'), dpi=300)
+plt.savefig(os.path.join(plots_path, 'Sampled_data_over_25_minutes.png'), dpi=300)
 plt.close()
-
 
 spark.stop()

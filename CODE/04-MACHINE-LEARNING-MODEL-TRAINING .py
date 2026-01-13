@@ -48,7 +48,7 @@ sc = spark.sparkContext
 data = spark.read \
     .option("header", "true") \
     .option("inferSchema", "true") \
-    .csv("DATA/data_Downsampled.csv") \
+    .csv("DATA/log_data_Downsampled.csv") \
 
 print(data.columns)
 
@@ -59,7 +59,13 @@ print(data.columns)
 r_columns = ["R" + str(i) for i in range(1, 15)]
 data = data.unpivot(
     ids=['Timestamp', 'CO_ppm', 'Humidity', 'Temperature', 'Flow_rate', 
-         'Heater_voltage', 'Temperature_diff', 'Heater_voltage_state', 'Sensors_Mean'], 
+         'Heater_voltage', 'Temperature_diff', 'Heater_voltage_state', 'Sensors_Mean',
+         'Sensors_Mean_short_zscore', 'Sensors_Mean_long_zscore',
+         'Sensors_Mean_midle_zscore', 'R1to7_Mean', 'R8to14_Mean',
+         'R1to7_Mean_short_zscore', 'R1to7_Mean_midle_zscore',
+         'R1to7_Mean_long_zscore', 'R8to14_Mean_short_zscore',
+         'R8to14_Mean_midle_zscore', 'R8to14_Mean_long_zscore',
+         'R1to7_Mean_medium_zscore', 'R8to14_Mean_medium_zscore'], 
     values=r_columns, 
     variableColumnName="Sensor_ID", 
     valueColumnName="R"
@@ -113,8 +119,8 @@ lr_param_grid = (
 
 rf_param_grid = (
     ParamGridBuilder()
-    .addGrid(rf.numTrees, [25,50])           
-    .addGrid(rf.maxDepth, [10,15])            
+    .addGrid(rf.numTrees, [25,50,75])           
+    .addGrid(rf.maxDepth, [10,15,20])            
     .build()
 )
 
@@ -130,7 +136,7 @@ for param_grid, model in zip([lr_param_grid,rf_param_grid],[lr,rf]):
         estimator=pipeline,
         estimatorParamMaps=param_grid,
         evaluator=evaluator_rmse,  # BinaryClassificationEvaluator
-        numFolds=3,
+        numFolds=2,
     )
     print(f"Running cross‑validation for {model_name}…")
     cv_model = cv.fit(train)

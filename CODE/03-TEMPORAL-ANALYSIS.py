@@ -11,7 +11,7 @@ plots_path = 'PLOTS/03-TEMPORAL ANALYSIS'
 os.makedirs(plots_path, exist_ok=True)
 sns.set_theme(style="darkgrid")
 
-data = pd.read_csv("DATA/data_Downsampled.csv", index_col='Timestamp', parse_dates=True)
+data = pd.read_csv("DATA/log_data_Downsampled.csv", index_col='Timestamp', parse_dates=True)
 
 # ===========================================================================================
 # TEMPORAL ANALYSIS
@@ -148,5 +148,7 @@ def kpss_report(series, regression="c"):
 # ===========================================================================================
 # Run tests on the raw series
 # ===========================================================================================
+print(data.columns)
+
 adf_report(data["Sensors_Mean"])
 kpss_report(data["Sensors_Mean"], regression="c")  # constant only (no trend)
