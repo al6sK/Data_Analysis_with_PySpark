@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import input_file_name, lag
+from pyspark.sql.functions import input_file_name, lag,expr
 import multiprocessing
 import os
 import sys
@@ -14,6 +14,7 @@ from pyspark.ml import Pipeline
 from pyspark.ml.regression import LinearRegression,RandomForestRegressor
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.tuning import ParamGridBuilder, CrossValidator
+from pyspark.ml.feature import StringIndexer
 
 # =======================================================
 # FIX FOR WINDOWS ONLY                                  #
@@ -56,33 +57,32 @@ print(data.columns)
 # Data preparacion
 # ===========================================================================================
 # melt data
-r_columns = ["R" + str(i) for i in range(1, 15)]
-data = data.unpivot(
-    ids=['Timestamp', 'CO_ppm', 'Humidity', 'Temperature', 'Flow_rate', 
-         'Heater_voltage', 'Temperature_diff', 'Heater_voltage_state', 'Sensors_Mean',
-         'Sensors_Mean_short_zscore', 'Sensors_Mean_long_zscore',
-         'Sensors_Mean_midle_zscore', 'R1to7_Mean', 'R8to14_Mean',
-         'R1to7_Mean_short_zscore', 'R1to7_Mean_midle_zscore',
-         'R1to7_Mean_long_zscore', 'R8to14_Mean_short_zscore',
-         'R8to14_Mean_midle_zscore', 'R8to14_Mean_long_zscore',
-         'R1to7_Mean_medium_zscore', 'R8to14_Mean_medium_zscore'], 
-    values=r_columns, 
-    variableColumnName="Sensor_ID", 
-    valueColumnName="R"
+features = [
+    "Timestamp","CO_ppm","Humidity","Temperature","Flow_rate","Heater_voltage",
+    "Temperature_diff","Heater_voltage_state","Sensors_Mean","R1to7_Mean","R8to14_Mean",
+    "R1to7_Mean_short_zscore","R1to7_Mean_medium_zscore","R1to7_Mean_long_zscore","R8to14_Mean_short_zscore",
+    "R8to14_Mean_medium_zscore","R8to14_Mean_long_zscore"
+]
+
+stack_string = "stack(14, " + \
+               ", ".join([f"'{i}', R{i}, Prev_R{i}" for i in range(1, 15)]) + \
+               ") as (Sensor_ID, R, Prev_R)"
+
+data = data.select(
+    *features,    
+    expr(stack_string)
 )
 
-# save lag values 
-windowSpec = Window.partitionBy("Sensor_ID").orderBy("Timestamp")
-data = data.withColumn("Prev_Sensors_Mean", lag("Sensors_Mean", 1).over(windowSpec))\
-            .withColumn("Prev_R", lag("R", 1).over(windowSpec)) 
-
-data = data.drop("Sensors_Mean").na.drop()
-
-data.select("Timestamp", "Sensor_ID", "R", "Prev_Sensors_Mean").show(5)
-
 # assembler
-input_cols = ['CO_ppm', 'Humidity', 'Temperature', 'Flow_rate','Heater_voltage',
-              'Temperature_diff', 'Heater_voltage_state', 'Prev_Sensors_Mean','Prev_R']
+input_cols = [   
+    'Prev_R',                   
+    'CO_ppm', 'Humidity', 'Temperature', 'Flow_rate', 
+    'Heater_voltage', 'Temperature_diff', 'Heater_voltage_state',
+    'Sensors_Mean',
+    'R1to7_Mean', 'R8to14_Mean',
+    'R1to7_Mean_short_zscore', 'R1to7_Mean_medium_zscore', 'R1to7_Mean_long_zscore',
+    'R8to14_Mean_short_zscore', 'R8to14_Mean_medium_zscore', 'R8to14_Mean_long_zscore'
+]
 assembler = VectorAssembler(inputCols = input_cols, outputCol = "features_raw")
 
 # Normalization
@@ -93,8 +93,8 @@ scaler = MinMaxScaler(inputCol="features_raw", outputCol="features")
 w = Window.orderBy("Timestamp")
 data = data.withColumn("rank", F.percent_rank().over(w))
 
-train = data.filter(F.col("rank") <= 0.9).cache()
-# val = data.filter((F.col("rank") > 0.7) & (F.col("rank") <= 0.9)).cache()
+train = data.filter(F.col("rank") <= 0.7).cache()
+val = data.filter((F.col("rank") > 0.7) & (F.col("rank") <= 0.9)).cache()
 test = data.filter(F.col("rank") > 0.9).cache()
 
 # print(f"Train rows: {train.count()}, Val rows: {val.count()}, Test rows: {test.count()}")
@@ -119,52 +119,55 @@ lr_param_grid = (
 
 rf_param_grid = (
     ParamGridBuilder()
-    .addGrid(rf.numTrees, [25,50,75])           
-    .addGrid(rf.maxDepth, [10,15,20])            
+    .addGrid(rf.numTrees, [1000]) # 50 ,200         
+    .addGrid(rf.maxDepth, [17]) # 17 
     .build()
 )
 
+# ===========================================================================================
+# Evaluation
+# ===========================================================================================
 results = []
 
 for param_grid, model in zip([lr_param_grid,rf_param_grid],[lr,rf]):
     model_name = model.__class__.__name__
-    # Build the pipeline
-    pipeline = Pipeline(stages=[assembler, scaler, model])
 
-    # Set up the CrossValidator for robustness
-    cv = CrossValidator(
-        estimator=pipeline,
-        estimatorParamMaps=param_grid,
-        evaluator=evaluator_rmse,  # BinaryClassificationEvaluator
-        numFolds=2,
-    )
-    print(f"Running cross‑validation for {model_name}…")
-    cv_model = cv.fit(train)
-    best_predictions = cv_model.transform(test)
+    best_model = None
+    best_rmse_val = float('inf')
+    best_params = None
 
-    rmse = evaluator_rmse.evaluate(best_predictions)
-    mae  = evaluator_mae.evaluate(best_predictions)
-    r2   = evaluator_r2.evaluate(best_predictions)
+    for params in param_grid:
+        temp_model = model.copy(params)
+        # Build the pipeline
+        pipeline = Pipeline(stages=[assembler, scaler, temp_model])
+        # Fit train data to model
+        fitted_model = pipeline.fit(train)
+        # Predicte val data
+        val_predictions = fitted_model.transform(val)
+        rmse_val = evaluator_rmse.evaluate(val_predictions)
 
-    best_model_stage = cv_model.bestModel.stages[-1]
-    results.append((model_name, rmse, mae, r2, best_model_stage))
+        if rmse_val < best_rmse_val:
+            best_rmse_val = rmse_val
+            best_model = fitted_model 
+            best_params = params
 
-print("\n" + "="*50)
-print(f"{'Model':<25} | {'RMSE':<10} | {'MAE':<10} | {'R2':<10}")
-print("-" * 65)
-
-for name, rmse, mae, r2, model in results:
-    print(f"{name:<25} | {rmse:<10.4f} | {mae:<10.4f} | {r2:<10.4f}")
+    test_predictions = best_model.transform(test)
     
-    if "RandomForest" in name:
-        trees = model.getOrDefault("numTrees")
-        depth = model.getOrDefault("maxDepth")
-        print(f"   --> Best Params: Trees={trees}, Depth={depth}")
-        
-    elif "LinearRegression" in name:
-        reg = model.getOrDefault("regParam")
-        elastic = model.getOrDefault("elasticNetParam")
-        print(f"   --> Best Params: RegParam={reg}, ElasticNet={elastic}")
-print("="*50)
+    test_mape = test_predictions.select(
+        F.mean(F.abs((F.col("R") - F.col("prediction")) / F.col("R")))
+    ).collect()[0][0] * 100
+    test_rmse = evaluator_rmse.evaluate(test_predictions)
+    test_mae  = evaluator_mae.evaluate(test_predictions)
+    test_r2   = evaluator_r2.evaluate(test_predictions)
+    
+    results.append((model_name,test_mape,  test_rmse, test_mae, test_r2, best_params))
+
+print("\n" + "="*80)
+print(f"{'Model':<20} | {'MAPE':<10} | {'RMSE':<10} | {'MAE':<10} | {'R2':<10} | {'Best Params'}")
+print("-" * 80)
+for name, mape, rmse, mae, r2, params in results:
+    param_str = str({p.name: v for p, v in params.items()})
+    print(f"{name:<20} | {mape:<10.4f} | {rmse:<10.4f} | {mae:<10.4f} | {r2:<10.4f} | {param_str}")
+print("="*80)
 
 spark.stop()

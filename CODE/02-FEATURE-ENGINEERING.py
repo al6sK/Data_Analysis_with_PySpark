@@ -21,7 +21,7 @@ print(data.shape)
 # ===========================================================================================
 # The first contextual feature is equal to the Temperature difference between consecutive time points.
 data["Temperature_diff"] = data["Temperature"].shift(1) - data["Temperature"]
-# data.dropna(inplace = True)
+# data.dropna(inplace = True) 
 
 # The second one is a binary option 0/1 characterizing the Heater_voltage to low or high.
 mid_point = (data['Heater_voltage'].min() + data['Heater_voltage'].max())/2
@@ -108,6 +108,7 @@ def plot_zscore(col_name, file_name):
 
 def create_short_medium_and_long_zscores_for(target_feature):
     short_windows = range(1,13)  
+    
     # short z score
     feature_name = f"{target_feature}_short_zscore"
     long_windows = range(2,13)  
@@ -131,6 +132,22 @@ def create_short_medium_and_long_zscores_for(target_feature):
 
 create_short_medium_and_long_zscores_for("R1to7_Mean")
 create_short_medium_and_long_zscores_for("R8to14_Mean")
+
+# ===========================================================================================
+# Add lag to mean and target features
+# ===========================================================================================
+cols_to_lag = ["Sensors_Mean","R1to7_Mean","R8to14_Mean","R1to7_Mean_short_zscore",
+              "R1to7_Mean_medium_zscore","R1to7_Mean_long_zscore","R8to14_Mean_short_zscore",
+              "R8to14_Mean_medium_zscore","R8to14_Mean_long_zscore"]
+
+for col in cols_to_lag:
+    data[col] = data[col].shift(1)
+   
+r_columns = ["R" + str(i) for i in range(1, 15)]
+for col in r_columns:
+    data["Prev_" + col] = data[col].shift(1)
+
+data.dropna(inplace = True) 
 
 # save to csv file for later
 data.to_csv("DATA/log_data_Downsampled.csv", index=True)

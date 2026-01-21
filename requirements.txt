@@ -5,3 +5,6 @@ seaborn
 pyarrow
 statsmodels
 scikit-learn
+keras
+tensorflow
+numpy
