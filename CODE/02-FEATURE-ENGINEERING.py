@@ -47,7 +47,7 @@ data["R8to14_Mean"] = data[R8to14].mean(axis=1)
 def finding_MA_pair(short_windows, long_windows, target_feature):
     results = []
     # target = data[target_feature].shift(-1)
-    target = data['CO_ppm']
+    target = data[target_feature] #CO_ppm
 
     for short_w in short_windows:
         for long_w in long_windows:

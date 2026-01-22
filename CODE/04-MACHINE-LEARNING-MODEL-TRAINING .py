@@ -26,9 +26,9 @@ sys.path.append("C:\\hadoop\\bin")                      #
 os.environ['PATH'] += os.pathsep + "C:\\hadoop\\bin"    #
 # =======================================================
 
-plots_path = 'PLOTS/04-MACHINE-LEARNING-MODEL-TRAINING '
+plots_path = 'PLOTS/04_MACHINE_LEARNING_MODEL_TRAINING'
 os.makedirs(plots_path, exist_ok=True)
-sns.set_theme(style="darkgrid")
+sns.set_theme(style="whitegrid")
 
 cores = multiprocessing.cpu_count()
 spark = (
@@ -78,7 +78,7 @@ input_cols = [
     'Prev_R',                   
     'CO_ppm', 'Humidity', 'Temperature', 'Flow_rate', 
     'Heater_voltage', 'Temperature_diff', 'Heater_voltage_state',
-    'Sensors_Mean',
+    # 'Sensors_Mean',
     'R1to7_Mean', 'R8to14_Mean',
     'R1to7_Mean_short_zscore', 'R1to7_Mean_medium_zscore', 'R1to7_Mean_long_zscore',
     'R8to14_Mean_short_zscore', 'R8to14_Mean_medium_zscore', 'R8to14_Mean_long_zscore'
@@ -87,7 +87,6 @@ assembler = VectorAssembler(inputCols = input_cols, outputCol = "features_raw")
 
 # Normalization
 scaler = MinMaxScaler(inputCol="features_raw", outputCol="features")
-
 
 # Data spliting
 w = Window.orderBy("Timestamp")
@@ -105,10 +104,6 @@ test = data.filter(F.col("rank") > 0.9).cache()
 lr = LinearRegression(featuresCol="features", labelCol="R")
 rf = RandomForestRegressor(featuresCol="features", labelCol="R", seed=42)
 
-evaluator_rmse = RegressionEvaluator(labelCol="R", predictionCol="prediction", metricName="rmse")
-evaluator_mae  = RegressionEvaluator(labelCol="R", predictionCol="prediction", metricName="mae")
-evaluator_r2   = RegressionEvaluator(labelCol="R", predictionCol="prediction", metricName="r2")
-
 # Define the parameter grids
 lr_param_grid = (
     ParamGridBuilder()
@@ -119,16 +114,51 @@ lr_param_grid = (
 
 rf_param_grid = (
     ParamGridBuilder()
-    .addGrid(rf.numTrees, [1000]) # 50 ,200         
-    .addGrid(rf.maxDepth, [17]) # 17 
+    .addGrid(rf.numTrees, [200]) # 200         
+    .addGrid(rf.maxDepth, [20]) # 20
     .build()
 )
+# ===========================================================================================
+# Plot results
+# ===========================================================================================
+def plot_predictions_vs_real(predictions, model_name):
+    data = predictions.select("Timestamp", "Sensor_ID", "R_real", "prediction_real").toPandas()
+    data.sort_values(by=['Sensor_ID', 'Timestamp'], inplace=True)
 
+    fig , axes = plt.subplots(nrows=5, ncols=3, figsize=(20, 26), sharex=True)
+    axes = axes.flatten()
+
+    sensor_ids = sorted(data['Sensor_ID'].unique(), key=int)
+
+    for i, sensor_id in enumerate(sensor_ids):
+        ax = axes[i]
+        sensor_data = data[data['Sensor_ID'] == sensor_id]
+        l1, = ax.plot(sensor_data['Timestamp'], sensor_data['R_real'], label='Actual', color="black", alpha=0.7, linewidth=1)
+        l2, = ax.plot(sensor_data['Timestamp'], sensor_data['prediction_real'],label='Predicted', color="red", alpha=0.7, linewidth=1, linestyle='--')
+        ax.set_title(f"Sensor R{sensor_id}", fontsize=11, fontweight='bold', loc='left', color='black')
+        if i == 0:
+            handles = [l1, l2]
+            labels  = [l1.get_label(), l2.get_label()]
+    plt.tight_layout(rect=[0, 0.02, 1, 0.93])
+    fig.legend(handles, labels, 
+                loc='lower center',           
+                bbox_to_anchor=(0.5, 0.93),   
+                ncol=2, 
+                frameon=True, 
+                fontsize=13,
+                facecolor='white',
+                edgecolor='lightgray',
+                borderpad=0.6)
+        
+    plt.suptitle(f"Model Accuracy Analysis: {model_name}", fontsize=25, fontweight='bold', y=0.98, color='#2C3E50')
+    plt.savefig(os.path.join(plots_path, f"{model_name}_Performance_per_Sensor.png"), dpi=300)
+    plt.close()
 # ===========================================================================================
 # Evaluation
 # ===========================================================================================
-results = []
+evaluator_rmse = RegressionEvaluator(labelCol="R", predictionCol="prediction", metricName="rmse")
 
+results = []
 for param_grid, model in zip([lr_param_grid,rf_param_grid],[lr,rf]):
     model_name = model.__class__.__name__
 
@@ -152,15 +182,23 @@ for param_grid, model in zip([lr_param_grid,rf_param_grid],[lr,rf]):
             best_params = params
 
     test_predictions = best_model.transform(test)
-    
-    test_mape = test_predictions.select(
-        F.mean(F.abs((F.col("R") - F.col("prediction")) / F.col("R")))
-    ).collect()[0][0] * 100
-    test_rmse = evaluator_rmse.evaluate(test_predictions)
-    test_mae  = evaluator_mae.evaluate(test_predictions)
-    test_r2   = evaluator_r2.evaluate(test_predictions)
-    
-    results.append((model_name,test_mape,  test_rmse, test_mae, test_r2, best_params))
+    # Reverse log real values and predicted
+    test_predictions = test_predictions.withColumn("R_real", F.expm1("R"))\
+                                        .withColumn("prediction_real", F.expm1("prediction"))
+    # Evaluation
+    real_evaluator_rmse = RegressionEvaluator(labelCol="R_real", predictionCol="prediction_real", metricName="rmse")
+    real_evaluator_mae  = RegressionEvaluator(labelCol="R_real", predictionCol="prediction_real", metricName="mae")
+    real_evaluator_r2   = RegressionEvaluator(labelCol="R_real", predictionCol="prediction_real", metricName="r2")
+
+    test_mape = test_predictions.select(F.mean(F.abs((F.col("R_real") - F.col("prediction_real")) / F.col("R_real")))).collect()[0][0] * 100
+    test_rmse = real_evaluator_rmse.evaluate(test_predictions)
+    test_mae  = real_evaluator_mae.evaluate(test_predictions)
+    test_r2   = real_evaluator_r2.evaluate(test_predictions)
+    # Save results
+    results.append((model_name, test_mape, test_rmse, test_mae, test_r2, best_params))
+
+    # Plot Real VS Predictions values
+    plot_predictions_vs_real(test_predictions, model_name)
 
 print("\n" + "="*80)
 print(f"{'Model':<20} | {'MAPE':<10} | {'RMSE':<10} | {'MAE':<10} | {'R2':<10} | {'Best Params'}")
@@ -169,5 +207,4 @@ for name, mape, rmse, mae, r2, params in results:
     param_str = str({p.name: v for p, v in params.items()})
     print(f"{name:<20} | {mape:<10.4f} | {rmse:<10.4f} | {mae:<10.4f} | {r2:<10.4f} | {param_str}")
 print("="*80)
-
 spark.stop()
