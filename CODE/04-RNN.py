@@ -105,16 +105,16 @@ def build_lstm(
         dropout=dropout,
         recurrent_dropout=recurrent_dropout,
     )(inputs)
-    x = keras.layers.Dropout(0.2)(x)
+    # x = keras.layers.Dropout(0.2)(x)
 
     x = keras.layers.Dense(1048, activation="relu")(x)
-    x = keras.layers.Dropout(0.2)(x)
+    # x = keras.layers.Dropout(0.2)(x)
+
+    x = keras.layers.Dense(1048, activation="relu")(x)
+    # x = keras.layers.Dropout(0.2)(x)
 
     x = keras.layers.Dense(128, activation="relu")(x)
-    x = keras.layers.Dropout(0.2)(x)
-
-    x = keras.layers.Dense(128, activation="relu")(x)
-    x = keras.layers.Dropout(0.2)(x)
+    # x = keras.layers.Dropout(0.2)(x)
 
     x = keras.layers.Dense(28, activation="relu")(x)
     x = keras.layers.Dropout(0.2)(x)
