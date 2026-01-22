@@ -76,15 +76,15 @@ print("X_test shape:", X_test.shape, "Y_test shape:", Y_test.shape)
 
 LOOK_BACK       # This has been set before in the Data preparacion, so that the data shape is the same as the models input shape
 EPOCHS          = 3000
-PATIENCE        = 50
-BATCH           = 5
-LSTM_NEURONS    = 128
+PATIENCE        = 80
+BATCH           = 68
+LSTM_NEURONS    = 512*4
 N_FEATURES      = X_train.shape[2]
 # = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
 reduce_lr = ReduceLROnPlateau(
     monitor='val_loss', 
     factor=0.5,       
-    patience=35,       
+    patience=40,       
     min_lr=0.00001,  
     verbose=1
 )
@@ -105,19 +105,16 @@ def build_lstm(
         dropout=dropout,
         recurrent_dropout=recurrent_dropout,
     )(inputs)
-    # x = keras.layers.Dropout(0.2)(x)
 
-    x = keras.layers.Dense(1048, activation="relu")(x)
-    # x = keras.layers.Dropout(0.2)(x)
+    # peripopu 4 layers 32 to kathena
 
-    x = keras.layers.Dense(1048, activation="relu")(x)
-    # x = keras.layers.Dropout(0.2)(x)
+    x = keras.layers.Dense(32, activation="relu")(x)
 
-    x = keras.layers.Dense(128, activation="relu")(x)
-    # x = keras.layers.Dropout(0.2)(x)
+    x = keras.layers.Dense(32, activation="relu")(x)
 
-    x = keras.layers.Dense(28, activation="relu")(x)
-    x = keras.layers.Dropout(0.2)(x)
+    x = keras.layers.Dense(32, activation="relu")(x)
+
+    x = keras.layers.Dense(32, activation="relu")(x)
 
 
     outputs = keras.layers.Dense(14, activation="linear")(x)
