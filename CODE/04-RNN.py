@@ -34,7 +34,7 @@ scaled_target_features = target_scaler.fit_transform(target_features)
 # ===========================================================================================
 # create_3d_dataset
 # ===========================================================================================
-LOOK_BACK = 30
+LOOK_BACK = 30 #30
 # = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
 def create_3d_dataset(features_df, targets_df,time_steps):
     X = []
@@ -76,17 +76,17 @@ print("X_test shape:", X_test.shape, "Y_test shape:", Y_test.shape)
 # = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
 
 LOOK_BACK       # This has been set before in the Data preparacion, so that the data shape is the same as the models input shape
-EPOCHS          = 1000 
+EPOCHS          = 600 
 EPOCHS_PATIENCE = 50    # 50 
 LR_PATIENCE     = 25    # 25 
-BATCH           = 16   # 16 
-LONG_LSTM       = 128   # 128
+BATCH           = 256    # 16 
+LONG_LSTM       = 256   # 128
 N_FEATURES      = X_train.shape[2]
 
 # = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
 reduce_lr = ReduceLROnPlateau(
     monitor='val_loss', 
-    factor=0.5,       
+    factor=0.8,   # 0.5    
     patience=LR_PATIENCE,       
     min_lr=0.00001,  
     verbose=1
@@ -106,12 +106,14 @@ def build_lstm(
         return_sequences=False
     )(inputs)
 
-    # peripopu 4 layers 32 to kathena
+    # lstm 256 + 4x 128
 
-    x = keras.layers.Dense(32, activation="relu")(x)
-    x = keras.layers.Dense(32, activation="relu")(x)
-    x = keras.layers.Dense(32, activation="relu")(x)
-    x = keras.layers.Dense(32, activation="relu")(x)
+    # peripopu 4 layers 32 to kathena 
+
+    x = keras.layers.Dense(128, activation="relu")(x)
+    x = keras.layers.Dense(128, activation="relu")(x)
+    x = keras.layers.Dense(128, activation="relu")(x)
+    x = keras.layers.Dense(128, activation="relu")(x)
 
     outputs = keras.layers.Dense(14, activation="linear")(x)
 
