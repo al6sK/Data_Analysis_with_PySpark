@@ -2,7 +2,6 @@ import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-import sys
 import seaborn as sns
 import pandas as pd
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
@@ -12,7 +11,7 @@ import datetime
 
 plots_path = 'PLOTS/04_RNN'
 os.makedirs(plots_path, exist_ok=True)
-sns.set_theme(style="darkgrid")
+sns.set_theme(style="whitegrid")
 
 data = pd.read_csv("DATA/log_data_Downsampled.csv", index_col='Timestamp', parse_dates=True)
 
@@ -21,7 +20,7 @@ data = pd.read_csv("DATA/log_data_Downsampled.csv", index_col='Timestamp', parse
 # ===========================================================================================
 
 # Split the dataset to : input_features , target_features
-r_columns = ["R" + str(i) for i in range(1, 15)]
+r_columns = ["Target_R" + str(i) for i in range(1, 15)]
 target_features = data[r_columns]
 input_features = data.drop(columns = r_columns)
 
@@ -47,10 +46,10 @@ def create_3d_dataset(features_df, targets_df,time_steps):
 
 X , Y = create_3d_dataset(scaled_input_features,scaled_target_features,LOOK_BACK)
 
-# Split data to 70% - 15% - 15% for train, val and test 
+# Split data to 70% - 20% - 10% for train, val and test 
 data_size = len(X)
 train_end = int(data_size * 0.7)
-val_end = int(data_size * 0.85)
+val_end = int(data_size * 0.9)
 
 X_train = X[:train_end]
 Y_train = Y[:train_end ]
@@ -76,17 +75,17 @@ print("X_test shape:", X_test.shape, "Y_test shape:", Y_test.shape)
 # = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
 
 LOOK_BACK       # This has been set before in the Data preparacion, so that the data shape is the same as the models input shape
-EPOCHS          = 600 
+EPOCHS          = 1500 
 EPOCHS_PATIENCE = 50    # 50 
 LR_PATIENCE     = 25    # 25 
-BATCH           = 256    # 16 
-LONG_LSTM       = 256   # 128
+BATCH           = 8    # 8 
+LONG_LSTM       = 256   # 256 
 N_FEATURES      = X_train.shape[2]
 
 # = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
 reduce_lr = ReduceLROnPlateau(
     monitor='val_loss', 
-    factor=0.8,   # 0.5    
+    factor=0.55,   # 0.55 
     patience=LR_PATIENCE,       
     min_lr=0.00001,  
     verbose=1
@@ -103,22 +102,28 @@ def build_lstm(
 
     x = keras.layers.LSTM(
         LONG_LSTM,
-        return_sequences=False
+        return_sequences=False, # 
     )(inputs)
 
-    # lstm 256 + 4x 128
+    x = keras.layers.Dropout(0.1)(x) # 0.1
 
-    # peripopu 4 layers 32 to kathena 
+    # x = keras.layers.LSTM(
+    #     64, #64
+    #     return_sequences=False,
+    # )(x)
 
-    x = keras.layers.Dense(128, activation="relu")(x)
-    x = keras.layers.Dense(128, activation="relu")(x)
-    x = keras.layers.Dense(128, activation="relu")(x)
-    x = keras.layers.Dense(128, activation="relu")(x)
+    # only 1 lstm 256 + 4 hidden layers 128-64-32-16
+
+    x = keras.layers.Dense(128, activation="swish", kernel_initializer="he_normal")(x)  
+    x = keras.layers.Dense(64, activation="swish", kernel_initializer="he_normal")(x)   
+    x = keras.layers.Dense(32, activation="swish", kernel_initializer="he_normal")(x) 
+    x = keras.layers.Dense(16, activation="swish", kernel_initializer="he_normal")(x)
+    
 
     outputs = keras.layers.Dense(14, activation="linear")(x)
 
     model = keras.Model(inputs, outputs)
-    model.compile(optimizer="adam", loss="mse") 
+    model.compile(optimizer="nadam", loss="mse") # optimizer="nadam"
     return model
 
 # ===========================================================================================
@@ -131,7 +136,11 @@ model = build_lstm(
 # ===========================================================================================
 # Model training with EarlyStopping
 # ===========================================================================================
-callback = EarlyStopping(monitor='val_loss', patience=EPOCHS_PATIENCE, restore_best_weights=True)
+callback = EarlyStopping(
+    monitor='val_loss', 
+    patience=EPOCHS_PATIENCE, 
+    restore_best_weights=True,
+    )
 
 start = datetime.datetime.now()
 
@@ -142,7 +151,7 @@ history = model.fit(
     batch_size= BATCH,
     validation_data=(X_val, Y_val),
     callbacks=[callback,reduce_lr],
-    shuffle=True,
+    shuffle=True, # True 
 )
 train_time = datetime.datetime.now() - start 
 train_time = str(train_time).split('.')[0]
@@ -162,27 +171,79 @@ Y_test_real = np.expm1(Y_test_log)
 # ===========================================================================================
 # Evaluation
 # ===========================================================================================
-mape = mean_absolute_percentage_error(Y_test_real, predictions_real) * 100
-rmse = np.sqrt(mean_squared_error(Y_test_real, predictions_real))
-mae  = mean_absolute_error(Y_test_real, predictions_real)
-r2   = r2_score(Y_test_real, predictions_real)
+# mape = mean_absolute_percentage_error(Y_test_real, predictions_real) * 100
+# rmse = np.sqrt(mean_squared_error(Y_test_real, predictions_real))
+# mae  = mean_absolute_error(Y_test_real, predictions_real)
+# r2   = r2_score(Y_test_real, predictions_real)
 
-print("\n" + "="*40)
-print(" LSTM FINAL RESULTS")
-print("="*40)
-print(f"MAPE: {mape:.4f} %")  
-print(f"RMSE: {rmse:.4f}")
-print(f"MAE:  {mae:.4f}")
-print(f"R2:   {r2:.4f}")
-print("="*40)
+# print("\n" + "="*40)
+# print(" LSTM FINAL RESULTS")
+# print("="*40)
+# print(f"MAPE: {mape:.4f} %")  
+# print(f"RMSE: {rmse:.4f}")
+# print(f"MAE:  {mae:.4f}")
+# print(f"R2:   {r2:.4f}")
+# print("="*40)
+# ===========================================================================================
+# Evaluation per Sensor
+# ===========================================================================================
+metrics_data = []
 
-test_start_index = val_end + LOOK_BACK
-test_timestamps = data.index[test_start_index : test_start_index + len(Y_test)]
+import time
+start_inf = time.time()
+_ = model.predict(X_test, verbose=0)
+end_inf = time.time()
+inference_time = end_inf - start_inf
 
+print(f"Total Training Time: {train_time} seconds")
+print(f"Total Inference Time: {inference_time:.4f} seconds")
+
+for i in range(14):
+    sensor_name = f"Sensor_R{i+1}"
+   
+    y_true_s = Y_test_real[:, i]
+    y_pred_s = predictions_real[:, i]
+
+    mape = round((mean_absolute_percentage_error(y_true_s, y_pred_s) * 100), 4)
+    rmse = round(np.sqrt(mean_squared_error(y_true_s, y_pred_s)), 4)
+    mae  = round(mean_absolute_error(y_true_s, y_pred_s), 4)
+    r2   = round(r2_score(y_true_s, y_pred_s), 4)
+
+    errors = y_true_s - y_pred_s
+    mean_error = round( np.mean(errors), 4)
+    std_error  = round( np.std(errors), 4)
+    
+    metrics_data.append({
+        "Sensor_ID": sensor_name,
+        "MAPE (%)": mape,
+        "MAE": mae,
+        "RMSE": rmse,
+        "R2": r2,
+        "Mean_Error": mean_error, 
+        "Std_Error": std_error    
+    })
+
+metrics_df = pd.DataFrame(metrics_data)
+metrics_df.set_index("Sensor_ID", inplace=True)
+
+print("\n" + "="*60)
+print(" LSTM PER SENSOR RESULTS")
+print("="*60)
+print(metrics_df)
+print("="*60)
+
+metrics_df.to_csv(
+    os.path.join(plots_path, "LSTM_Metrics_Per_Sensor.csv"), 
+    sep=';',     
+    decimal=','
+)
 
 # ===========================================================================================
 # Plot predictions vs real
 # ===========================================================================================
+test_start_index = val_end + LOOK_BACK
+test_timestamps = data.index[test_start_index : test_start_index + len(Y_test)]
+
 results_list = []
 
 for i in range(14): 

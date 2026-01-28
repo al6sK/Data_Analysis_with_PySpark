@@ -5,7 +5,7 @@ import os
 import sys
 from pyspark.sql.window import Window
 from pyspark.sql import functions as F
-from pyspark.sql.functions import col, count, when, mean, variance, lit, max,format_number,avg,window
+from pyspark.sql.functions import col, count, when, mean, variance, lit, max,format_number,avg,window,round
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -64,9 +64,9 @@ df_renamed = df_raw.toDF(*new_column_names)
 df_bucketed = df_renamed.withColumn("Time", F.floor(F.col("Time") / 300))
 
 cols_to_avg = [c for c in df_bucketed.columns if c not in ["Time","source_file"]]
-calc_mean = [F.mean(c).alias(c) for c in cols_to_avg]
+calc_avg = [F.mean(c).alias(c) for c in cols_to_avg]
 
-df_grouped_by_file = df_bucketed.groupBy("source_file", "Time").agg(*calc_mean)
+df_grouped_by_file = df_bucketed.groupBy("source_file", "Time").agg(*calc_avg)
 df_sorted = df_grouped_by_file.orderBy("source_file", "Time")
 
 df_sorted.select("Time", "source_file","CO_ppm", "Humidity", "Temperature", "Flow_rate", "Heater_voltage", "R14").show(10, truncate=False)
@@ -74,7 +74,10 @@ print(f"rows: {df_sorted.count()}")
 
 start_date = "2025-09-01 00:00:00"
 w = Window.orderBy("source_file", "Time")
-df_final = df_sorted.withColumn("Timestamp",F.to_timestamp(F.lit(start_date)) + (F.row_number().over(w) - 1) * F.expr("INTERVAL 5 MINUTES")).drop("Time","source_file")
+df_final = df_sorted.withColumn(
+    "Timestamp",
+    F.to_timestamp(F.lit(start_date)) + (F.row_number().over(w) - 1) * F.expr("INTERVAL 5 MINUTES")
+    ).drop("Time","source_file")
 
 df_final.select("Timestamp","CO_ppm", "Humidity", "Temperature", "Flow_rate", "Heater_voltage", "R14").show(10, truncate=False)
 print(f"Final rows: {df_final.count()}")
@@ -291,9 +294,9 @@ print(f"Sum of CO_ppm: {result}")
 # ===========================================================================================
 sensors = ["R" + str(i) for i in range(1,15)]
 
-mean_exprs = [mean(r).alias(r) for r in sensors]
+mean_exprs = [F.round(mean(r),2).alias(r) for r in sensors]
 df_mean = df_final.select(mean_exprs).withColumn("Statistic", lit("Mean"))
-variance_exprs = [variance(r).alias(r) for r in sensors]
+variance_exprs = [F.round(variance(r),2).alias(r) for r in sensors]
 df_variance = df_final.select(variance_exprs).withColumn("Statistic", lit("Variance"))
 
 columns = ["Statistic"] + sensors
@@ -303,28 +306,33 @@ result.show(truncate=True)
 # ===========================================================================================
 # (iii) Return the count of rows that have CO_ppm > 10 ppm and Humidity < 30 % RH 
 # ===========================================================================================
-count = df_final.filter("CO_ppm > 10 AND Humidity < 30").count()
-print(f"{count} is the number of rows that have CO_ppm > 10 ppm and Humidity < 30 % RH")
+accumulator = sc.accumulator(0) 
 
+def count_condition(row):
+    if row['CO_ppm'] > 10 and row['Humidity'] < 30:
+        accumulator.add(1) 
+
+df_final.foreach(count_condition)
+print(f"{accumulator .value} is the number of rows that have CO_ppm > 10 ppm and Humidity < 30 % RH")
 # ===========================================================================================
 # (iv) Create a new column R, with R = ((5-V)/V) * 1_000_000 
 # ===========================================================================================
 df_final = df_final.withColumn("R", (( 5 - col("Heater_voltage")) / col("Heater_voltage")) * 1_000_000)
-result = df_final.groupBy("Heater_voltage").agg(max("R").alias("max_R"))
-result = result.withColumn("max_R",format_number("max_R", 2))
+result = df_final.groupBy(F.round("Heater_voltage",2).alias("Heater_voltage")).agg(max("R").alias("max_R"))
+result = result.withColumn("max_R",format_number("max_R", 2)).orderBy("Heater_voltage")
 result.show(truncate=False)
 
 # ===========================================================================================
 # (v) Downsampling to 25 min
 # ===========================================================================================
 
-cols_to_avg = ["R7","CO_ppm","Humidity"]
+cols_to_avg = ["R7","CO_ppm"]
 
 aggs = [F.mean(c).alias(c) for c in cols_to_avg]
 sampled_data = df_final.groupBy(F.window("Timestamp", "25 minutes")).agg(*aggs)
 # keep only the start of the returned window
 sampled_data = sampled_data.withColumn("Timestamp", F.col("window.start")).drop("window").orderBy("Timestamp")
-sampled_data.select("Timestamp","R7", "CO_ppm", "Humidity").show(10, truncate=False)
+sampled_data.select("Timestamp","R7", "CO_ppm").show(10, truncate=False)
 
 sampled_data = sampled_data.toPandas().set_index('Timestamp')
 sampled_data = sampled_data[:int(len(sampled_data)/6)]
@@ -332,7 +340,6 @@ colors = sns.color_palette("bright", 5)
 plt.figure(figsize=(15,8))
 plt.plot(sampled_data['R7'], label='R7', color=colors[0], linewidth=1.5,alpha=0.8)
 plt.plot(sampled_data['CO_ppm'], label='CO_ppm', color=colors[1], linewidth=1.5,alpha=0.8)
-plt.plot(sampled_data['Humidity'], label='Humidity', color=colors[2], linewidth=1.5,alpha=0.8)
 plt.title('Sampled data over 25 minutes')
 plt.xlabel('Time')
 plt.ylabel('Value')

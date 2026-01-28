@@ -6,7 +6,7 @@ from sklearn.feature_selection import mutual_info_regression
 
 plots_path = 'PLOTS/02_FEATURE ENGINEERING'
 os.makedirs(plots_path, exist_ok=True)
-sns.set_theme(style="darkgrid")
+sns.set_theme(style="whitegrid")
 
 data = pd.read_csv("DATA/log_data_Downsampled.csv", index_col='Timestamp', parse_dates=True)
 
@@ -34,30 +34,59 @@ sensors = ["R" + str(i) for i in range(1,15)]
 data["Sensors_Mean"] = data[sensors].mean(axis=1)
 print(data[["Temperature_diff","Heater_voltage_state","Sensors_Mean"]].head(15))
 
+# Showing Sensors_Mean in a moving average of 25 min
+temp_df = data[['CO_ppm',"Sensors_Mean"]]
+temp_df = temp_df[1000:1100]
+fig, ax1 = plt.subplots(figsize=(15, 7))
+color_r = 'tab:purple'
+ax1.set_xlabel('Timestamp (Time)', fontsize=12)
+ax1.set_ylabel('Average Sensor Resistance', color=color_r, fontsize=12, fontweight='bold')
+
+ax1.plot(temp_df.index, temp_df['Sensors_Mean'], color=color_r, label='Sensors_Mean (R1-R14)', linewidth=1.5, alpha=0.8)
+
+ax1.tick_params(axis='y', labelcolor=color_r)
+ax1.grid(True, alpha=0.3)
+ax2 = ax1.twinx() 
+color_co = 'tab:cyan'
+ax2.set_ylabel(f'CO Concentration (Rolling 25min)', color=color_co, fontsize=12, fontweight='bold')
+
+ax2.plot(temp_df.index, temp_df['CO_ppm'].rolling(window=5).mean(), color=color_co, label='CO_ppm', linewidth=1.5, alpha=0.8)
+
+ax2.tick_params(axis='y', labelcolor=color_co)
+ax2.grid(False) 
+
+plt.title('Μέσος Όρος Αισθητήρων vs Συγκέντρωση CO_ppm', fontsize=16)
+fig.tight_layout()  
+
+plt.savefig(os.path.join(plots_path, f"Sensors_Mean_CO_ppm_MA.png"), dpi=300)
+plt.close()
+
+# ===========================================================================================
+# Creating extra contextual features using the Moving Average
+# ===========================================================================================
 R1to7 = ["R" + str(i) for i in range(1,8)]
 R8to14 = ["R" + str(i) for i in range(8,15)]
 
 data["R1to7_Mean"] = data[R1to7].mean(axis=1)
 data["R8to14_Mean"] = data[R8to14].mean(axis=1)
 
-# ===========================================================================================
-# Creating extra contextual features using the Moving Average
-# ===========================================================================================
-
 def finding_MA_pair(short_windows, long_windows, target_feature):
     results = []
-    # target = data[target_feature].shift(-1)
-    target = data[target_feature] #CO_ppm
+    # Set the target
+    target = data[target_feature].shift(-1)
+
+    # find the best pair based of the future train dataset to prevent data leakage
+    half_dataset = data[:int((len(data)-2) * 0.9)]
 
     for short_w in short_windows:
         for long_w in long_windows:
             if short_w >= long_w:
                 continue
-            rolling_mean = data[target_feature].rolling(window=long_w).mean()
-            rolling_std  = data[target_feature].rolling(window=long_w).std()
+            rolling_mean = half_dataset[target_feature].rolling(window=long_w).mean()
+            rolling_std  = half_dataset[target_feature].rolling(window=long_w).std()
 
-            current_val_or_short_mean = data[target_feature].rolling(window=short_w).mean()
-            z_score = (current_val_or_short_mean - rolling_mean) / rolling_std 
+            short_mean = half_dataset[target_feature].rolling(window=short_w).mean()
+            z_score = (short_mean - rolling_mean) / rolling_std 
 
             temp_df = pd.DataFrame({'Z_Score': z_score,'Target': target}).dropna()
             
@@ -100,7 +129,7 @@ def plot_zscore(col_name, file_name):
     plt.title(f'{col_name} z_score')
     plt.xlabel('Time')
     plt.ylabel('Value')
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+    # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
     plt.grid("x")
     plt.tight_layout()
     plt.savefig(os.path.join(plots_path, f"{file_name}_z_score.png"), dpi=300)
@@ -134,20 +163,13 @@ create_short_medium_and_long_zscores_for("R1to7_Mean")
 create_short_medium_and_long_zscores_for("R8to14_Mean")
 
 # ===========================================================================================
-# Add lag to mean and target features
+# Create targets
 # ===========================================================================================
-cols_to_lag = ["Sensors_Mean","R1to7_Mean","R8to14_Mean","R1to7_Mean_short_zscore",
-              "R1to7_Mean_medium_zscore","R1to7_Mean_long_zscore","R8to14_Mean_short_zscore",
-              "R8to14_Mean_medium_zscore","R8to14_Mean_long_zscore"]
+sensors = ["R" + str(i) for i in range(1, 15)]
+for sensor in sensors:
+    data[f"Target_{sensor}"] = data[sensor].shift(-1)
 
-for col in cols_to_lag:
-    data[col] = data[col].shift(1)
-   
-r_columns = ["R" + str(i) for i in range(1, 15)]
-for col in r_columns:
-    data["Prev_" + col] = data[col].shift(1)
-
-data.dropna(inplace = True) 
+data.dropna(inplace=True)
 
 # save to csv file for later
 data.to_csv("DATA/log_data_Downsampled.csv", index=True)

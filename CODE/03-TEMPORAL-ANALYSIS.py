@@ -20,9 +20,7 @@ data = pd.read_csv("DATA/log_data_Downsampled.csv", index_col='Timestamp', parse
 # ===========================================================================================
 # Seasonal decomposition
 # ===========================================================================================
-# Finding out the number of periods
-
-decomp = seasonal_decompose(data["Sensors_Mean"], model="additive", period=13)
+decomp = seasonal_decompose(data["Sensors_Mean"], model="additive", period=300)
 
 # Plot the four components
 fig, axes = plt.subplots(4, 1, sharex=True, figsize=(10, 8))
@@ -62,7 +60,7 @@ print(f"Seasonality strength: {season_strength:.3f}")
 # ===========================================================================================
 # STL (Seasonal Trend Decomposition using LOESS) decomposition - robust to outliers
 # ===========================================================================================
-stl = STL(data["Sensors_Mean"], period=13, robust=True)
+stl = STL(data["Sensors_Mean"], period=300, robust=True)
 stl_res = stl.fit()
 
 fig, axes = plt.subplots(4, 1, sharex=True, figsize=(10, 10))
